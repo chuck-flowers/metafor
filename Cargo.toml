@@ -1,0 +1,17 @@
+[package]
+name = "metafor"
+version = "0.1.0"
+authors = ["Timothy Flowers <t_chuck_flowers@yahoo.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "^1.0.18"
+quote = "^1.0.7"
+syn = { version = "^1.0.33", features = ['full', 'visit-mut'] }
+
+[dev-dependencies]
+pretty_assertions = "^0.6.1"
+syn = { version = "^1.0.33", features = ['extra-traits', 'full', 'visit-mut'] }
