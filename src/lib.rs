@@ -1,29 +1,20 @@
+#![warn(clippy::all)]
+#![warn(clippy::cargo_common_metadata)]
+
 mod attr;
+mod replacement;
 
 use self::attr::MetaforAttr;
+use self::attr::TemplateValues;
+use self::replacement::IdentReplacer;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use std::collections::HashMap;
 use syn::parse_macro_input;
-use syn::visit_mut::visit_ident_mut;
 use syn::visit_mut::VisitMut;
 use syn::Ident;
 use syn::Item;
-
-struct IdentReplacer<'a> {
-    mapping: HashMap<&'a Ident, &'a Ident>,
-}
-
-impl<'a> VisitMut for IdentReplacer<'a> {
-    fn visit_ident_mut(&mut self, ident: &mut Ident) {
-        if let Some(new_ident) = self.mapping.get(ident) {
-            *ident = (*new_ident).clone();
-        }
-
-        visit_ident_mut(self, ident);
-    }
-}
 
 #[proc_macro_attribute]
 pub fn metafor(attr: TokenStream, input: TokenStream) -> TokenStream {
@@ -41,15 +32,16 @@ fn impl_metafor(input: Item, attr: MetaforAttr) -> Vec<Item> {
     generate_mappings(&attr)
         .map(|mapping| {
             let mut dup_input = input.clone();
-            replace_idents(&mut dup_input, mapping);
+
+            let mut ident_replacer = IdentReplacer::new(mapping);
+            ident_replacer.visit_item_mut(&mut dup_input);
+
             dup_input
         })
         .collect()
 }
 
-fn generate_mappings<'a>(
-    attr: &'a MetaforAttr,
-) -> impl Iterator<Item = HashMap<&'a Ident, &'a Ident>> {
+fn generate_mappings<'a>(attr: &'a MetaforAttr) -> impl Iterator<Item = HashMap<Ident, &'a Ident>> {
     let replacements = &attr.replacements;
 
     // Creates a counter for each template identifier.
@@ -59,24 +51,55 @@ fn generate_mappings<'a>(
     }
 
     let mut has_next_combo = true;
-    core::iter::from_fn::<HashMap<&'a Ident, &'a Ident>, _>(move || {
+    core::iter::from_fn(move || {
         if !has_next_combo {
             return None;
         }
 
-        let mut mapping: HashMap<&'a Ident, &'a Ident> = HashMap::new();
+        let mut mapping = HashMap::new();
 
         // Populate the map to return
-        for (template_ident, counter) in counters.iter() {
-            let replacement_ident = &replacements[*template_ident][*counter];
-            mapping.insert(*template_ident, replacement_ident);
+        for (temp_ident, counter) in counters.iter() {
+            match &replacements[*temp_ident] {
+                TemplateValues::Idents(idents) => {
+                    // Get the identifier that will replace the template parameter
+                    let replacement_ident = &idents[*counter];
+
+                    // Create the new identifier to replace
+                    let string = format!("__{}__", temp_ident);
+                    let temp_ident = Ident::new(&string, temp_ident.span());
+
+                    // Record the mapping
+                    mapping.insert(temp_ident, replacement_ident);
+                }
+                TemplateValues::Tuples(tuples) => {
+                    let temp_tuple = &tuples[*counter];
+
+                    for (i, temp_tuple_value) in temp_tuple.values().enumerate() {
+                        let string = format!("__{}__{}__", temp_ident, i);
+                        let temp_ident = Ident::new(&string, temp_ident.span());
+
+                        mapping.insert(temp_ident, temp_tuple_value);
+                    }
+                }
+                TemplateValues::Structs(structs) => {
+                    let temp_struct = &structs[*counter];
+
+                    for (struct_field, temp_struct_value) in temp_struct.fields() {
+                        let string = format!("__{}__{}__", temp_ident, struct_field);
+                        let temp_ident = Ident::new(&string, temp_ident.span());
+
+                        mapping.insert(temp_ident, temp_struct_value);
+                    }
+                }
+            };
         }
 
         // Iterate the next combination
         has_next_combo = false;
         for (template_ident, counter) in counters.iter_mut() {
             let max_count = replacements[template_ident].len();
-            *counter = *counter + 1;
+            *counter += 1;
 
             // If the current counter has reached its max, reset it and move to the next one.
             if *counter >= max_count {
@@ -91,20 +114,10 @@ fn generate_mappings<'a>(
     })
 }
 
-fn replace_idents(input: &mut Item, mapping: HashMap<&Ident, &Ident>) {
-    let mut ident_replacer = IdentReplacer { mapping };
-
-    match input {
-        Item::Impl(impl_item) => ident_replacer.visit_item_impl_mut(impl_item),
-        _ => todo!(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use proc_macro2::Span as Span2;
     use syn::parse_quote;
 
     #[test]
@@ -113,16 +126,8 @@ mod tests {
             impl MyTrait for __i__ {}
         };
 
-        let i_ident = Ident::new("__i__", Span2::call_site());
-        let u8_ident = Ident::new("u8", Span2::call_site());
-        let u16_ident = Ident::new("u16", Span2::call_site());
-
-        let attr = MetaforAttr {
-            replacements: {
-                let mut map = HashMap::new();
-                map.insert(i_ident, vec![u8_ident, u16_ident]);
-                map
-            },
+        let attr = parse_quote! {
+            i = [u8, u16]
         };
 
         let actual = impl_metafor(input, attr);
@@ -132,26 +137,5 @@ mod tests {
         ];
 
         assert_eq!(actual, expected)
-    }
-
-    #[test]
-    fn replace_idents_test() {
-        let mut input: Item = parse_quote! {
-            impl MyTrait for __i__ {}
-        };
-
-        let temp_ident = Ident::new("__i__", Span2::call_site());
-        let temp_value = Ident::new("u8", Span2::call_site());
-        replace_idents(&mut input, {
-            let mut map = HashMap::new();
-            map.insert(&temp_ident, &temp_value);
-            map
-        });
-
-        let expected: Item = parse_quote! {
-            impl MyTrait for u8 {}
-        };
-
-        assert_eq!(input, expected)
     }
 }
