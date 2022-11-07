@@ -1,8 +1,6 @@
 use core::ops::Index;
 use proc_macro2::Span as Span2;
 use std::collections::HashMap;
-use syn::group::parse_braces;
-use syn::group::Braces;
 use syn::parse::Parse;
 use syn::parse::ParseStream;
 use syn::parse::Result as ParseResult;
@@ -28,24 +26,23 @@ impl Index<&Ident> for StructValue {
 
 impl Parse for StructValue {
     fn parse(input: ParseStream) -> ParseResult<Self> {
-        let Braces {
-            content: ref input, ..
-        } = parse_braces(input)?;
+		let content;
+		syn::braced!(content in input);
 
         let mut fields = HashMap::new();
 
         loop {
-            let ident: Ident = input.parse()?;
-            let _: Token!(:) = input.parse()?;
-            let ident_val: Ident = input.parse()?;
+            let ident: Ident = content.parse()?;
+            let _: Token!(:) = content.parse()?;
+            let ident_val: Ident = content.parse()?;
 
             fields.insert(ident, ident_val);
 
-            if input.is_empty() {
+            if content.is_empty() {
                 break;
             }
 
-            let _: Token!(,) = input.parse()?;
+            let _: Token!(,) = content.parse()?;
         }
 
         Ok(Self(fields))

@@ -1,7 +1,5 @@
 use core::ops::Index;
 use proc_macro2::Span as Span2;
-use syn::group::parse_parens;
-use syn::group::Parens;
 use syn::parse::Parse;
 use syn::parse::ParseStream;
 use syn::parse::Result as ParseResult;
@@ -32,11 +30,10 @@ impl Index<usize> for TupleValue {
 
 impl Parse for TupleValue {
     fn parse(input: ParseStream) -> ParseResult<Self> {
-        let Parens {
-            content: ref input, ..
-        } = parse_parens(input)?;
+		let content;
+		syn::parenthesized!(content in input);
 
-        let punc = Punctuated::parse_separated_nonempty(input)?;
+        let punc = Punctuated::parse_separated_nonempty(&content)?;
         Ok(Self(punc))
     }
 }

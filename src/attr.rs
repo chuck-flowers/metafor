@@ -4,9 +4,9 @@ mod tuples;
 use self::structs::StructValue;
 use self::tuples::TupleValue;
 use std::collections::HashMap;
-use syn::group::Brackets;
 use syn::parse::Error as ParseError;
 use syn::parse::Parse;
+use syn::parse::ParseBuffer;
 use syn::parse::ParseStream;
 use syn::parse::Result as ParseResult;
 use syn::punctuated::Punctuated;
@@ -113,7 +113,8 @@ impl TemplateValues {
 
 impl Parse for TemplateValues {
     fn parse(input: ParseStream) -> ParseResult<Self> {
-        let Brackets { content: input, .. } = syn::group::parse_brackets(input)?;
+        let content: ParseBuffer;
+        syn::bracketed!(content in input);
 
         fn parse_idents(input: ParseStream) -> ParseResult<TemplateValues> {
             Punctuated::parse_separated_nonempty(input).map(|punc| TemplateValues::Idents(punc))
@@ -127,9 +128,9 @@ impl Parse for TemplateValues {
             Punctuated::parse_separated_nonempty(input).map(|punc| TemplateValues::Structs(punc))
         }
 
-        let template_values = parse_idents(&input)
-            .or_else(|_| parse_tuples(&input))
-            .or_else(|_| parse_structs(&input))?;
+        let template_values = parse_idents(&content)
+            .or_else(|_| parse_tuples(&content))
+            .or_else(|_| parse_structs(&content))?;
 
         template_values.validate()
     }
